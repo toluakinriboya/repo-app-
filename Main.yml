@@ -1,0 +1,100 @@
+
+name: Build and Deploy to AWS EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: application-assessment-repo-solution
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Verify build tools
+        run: |
+          java -version
+          docker --version
+          docker info
+
+      - name: Build Spring Boot application and Docker image
+        run: |
+          chmod +x mvnw
+          docker build \
+            -t application-assessment-repo-solution:${{ github.sha }} .
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push image to ECR
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker tag \
+            "application-assessment-repo-solution:$IMAGE_TAG" \
+            "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          docker push "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+      - name: Configure SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+
+      - name: Deploy image to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ vars.EC2_USER }}
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          ssh -i ~/.ssh/ec2_key \
+            -o StrictHostKeyChecking=accept-new \
+            "$EC2_USER@$EC2_HOST" \
+            "REGISTRY='$REGISTRY' \
+             IMAGE_TAG='$IMAGE_TAG' \
+             AWS_REGION='$AWS_REGION' \
+             ECR_REPOSITORY='$ECR_REPOSITORY' \
+             bash -s" <<'REMOTE'
+          set -e
+
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+
+          docker pull "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          docker stop petclinic 2>/dev/null || true
+          docker rm petclinic 2>/dev/null || true
+
+          docker run -d \
+            --name petclinic \
+            --restart unless-stopped \
+            -p 8085:8080 \
+            "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          docker image prune -f
+          REMOTE
+
