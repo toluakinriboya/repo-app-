@@ -23,6 +23,12 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v5
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Verify build tools
         run: |
           java -version
@@ -97,4 +103,3 @@ jobs:
 
           docker image prune -f
           REMOTE
-
