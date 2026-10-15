@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
@@ -47,7 +46,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Login to Amazon ECR
@@ -109,4 +109,5 @@ jobs:
 
           docker image prune -f
           REMOTE
+
 
